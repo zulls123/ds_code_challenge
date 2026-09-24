@@ -1,189 +1,94 @@
+# City of Cape Town Data Engineer Challenge: Sections 1 and 2
 
-<img src="img/city_emblem.png" alt="City Logo"/>
+This repo is my submission for the Data Engineer track. It pulls the level 8 H3 hexagons out of the City's combined hex file with S3 Select, checks them, then assigns every service request to the level 8 hex it falls in.
 
-# City of Cape Town - Data Science Unit Code Challenge
+The original challenge instructions are in [CHALLENGE.md](CHALLENGE.md).
 
-## Purpose
+## How to run it
 
-The purpose of this challenge is to evaluate the skills of prospective Data Scientists, Engineers, Analysts and Front End Developer for positions in the City of Cape Town's Data Science unit. 
+Tested on Windows with Python 3.13.
 
-## Intended audience
+```
+git clone https://github.com/zulls123/ds_code_challenge.git
+cd ds_code_challenge
+python -m venv .venv
+.venv\Scripts\activate          # on Mac/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
 
-We will only evaluate responses to this challenge from people who we have requested to complete it. Of course, you are welcome to attempt it for your own enjoyment.
+The whole pipeline takes about 30 seconds. All input data and the dummy AWS credentials are downloaded from the City's S3 bucket at runtime, so nothing needs to be set up beforehand. Outputs are written to `data/`.
 
-## Way of working and expected structure of submission
-Principles of reproducible analysis and code versioning are very important to our workflow. Structuring your work to aid in reproducibility and readability is important. 
+To run the tests:
 
-So, follow common conventions with respect to directory structure and names to make your work as easy to follow as possible.
+```
+pytest
+```
 
-## What we're looking for
-### Expectation of Effort
-We expect you to spend up to 48 calendar hours working on this assessment per position. If you are finding that you are spending significantly more time than this, then please contact whomever sent you the link to this assessment to let them know.
+## What's in the repo
 
-You should have received over 7 days warning that you would be undertaking this assessment. Please notify [Delyno du Toit](delyno.dutoit@capetown.gov.za) if this was not the case.
+| Path | What it does |
+|---|---|
+| `main.py` | Runs section 1, then section 2 |
+| `src/extract.py` | Section 1: S3 Select extraction and validation |
+| `src/transform.py` | Section 2: assigns hexes to service requests and validates |
+| `config/schema.yaml` | The rules used for the section 1 schema conformance score |
+| `config/transform.yaml` | The join failure threshold for section 2 |
+| `tests/` | Unit tests for both sections, using small made-up data (no internet needed) |
+| `notebooks/` | My exploration notebooks. Not part of the pipeline |
 
-### Things to focus on
-Over and above the tasks specified below, there are particular aspects of each position that we would like you to pay attention to:
+## Section 1: Extracting level 8 hexes
 
-* Data Scientist candidates - we're looking for both good, statistical insight into problems, as well as the ability to communicate complex topics. Please make special effort to highlight what you believe to be the crux of a particular problem, as well as how your work addresses it.
-* Data Engineer candidates - as the key enablers of our unit's work, we really want to see work done in a sustainable manner: writing for easy comprehension, testing, clean code, modularity all bring us joy.
-* Data Analyst candidates - we think our analysts have done a good job when they provide insights that inform actual decisions. Hence, we want evidence of both the ability to surface these insights from data, as well as the skill to convey those insights. Your audience is intelligent, but non-specialist.
+`city-hex-polygons-8-10.geojson` holds hexes at levels 8, 9 and 10. I use S3 Select to filter to `resolution = 8` on Amazon's side, so only the rows I need come back. S3 still scans the whole 108 MB file, but only about 2 MB is transferred.
 
-### Candidates where programming is required (Data Scientist; Engineers, Visualisation Engineer and Front End Developers)
-Requirements and notes:
-* For Data Science and Data Engineering, our primary programming languages are `python`, `R` and `SQL`. We will accept code that is packaged in `.py`, `.ipynb`, `.R` and `.Rmd` files. Scripts in `.sql` may also be included where applicable.
-* Data Visualisation engineers and Front End Developers should have knowledge of either `python` or `R`, and relevant front-end programming languages (e.g. Javascript, HTML, CSS). We will accept code that is packaged in `.py`, `.R` and appropriate front-end programming language specific files, e.g. `.js`, `.html` etc. Furthermore, we greatly appreciate adherence to the principles and guidelines of [Single Page Applications](https://en.wikipedia.org/wiki/Single-page_application).
-* Bash or similar scripting language files are fine for glue. You may develop in any development environment you choose. 
-* We expect to be able to clone your repo, immediately identify what script to execute from your README file, and execute it to completion with no human interaction. 
-  In order to ensure that our environment has the right libraries or packages, please follow standard python (PEP8) or R guidelines for structure in your code, i.e place `import` and `library()` commands at the top of your scripts.
-* If your repo does not clone and run, we will not attempt to fix it.
-* If your analysis makes use of any external data, the data must either be included in the repo, or be downloaded automatically during script execution.
+S3 Select returns results in chunks, and a record can be split across two chunks, so I join all chunks before splitting them into records.
 
-### Candidates where programming is not required (Data Analysts)
-*Note* If you prefer, you may submit using the requirements described above.
+**Validation.** The result is compared to `city-hex-polygons-8.geojson` on three things: count, hex IDs (in both directions, so missing and extra hexes are both caught) and shapes. Current result: 3,832 hexes, 0 missing, 0 extra, 0 shape differences.
 
-You can use any tool to produce the output, e.g. Python, R, Excel, Power BI, Tableau, etc. The **final deliverable needs to be a pdf report** with your analysis.
+**Schema conformance score.** The rules live in `config/schema.yaml` so they can be changed without touching code. Every rule is applied to every row, each rule gets a pass rate, and the score is the average pass rate across all rules. It passes if the score is at least 0.95.
 
-### Follow-on Questions
-If we invite you to an interview, after completing and submitting this technical assessment, we will be asking follow-up 
-questions about the work submitted. These questions might be at a very detailed level, or broadly conceptual, relating to 
-the choices made in completing this assessment.
+While testing this, I found a weakness: because the score is an average of 16 rules, one badly broken rule gets hidden by the others. With 75% of latitudes set to 0, the score was still 0.953, a pass. So I added a second condition: every individual rule must also pass at least 90% of rows (`min_rule_pass`). The same broken data now fails, and the log names the rule responsible. There's a test for this case.
 
-We do not expect perfect recall of what you may have submitted, but we do expect a deep knowledge of the content, and 
-how it works.
+## Section 2: Assigning hexes to service requests
 
-### Use of Generative AI and/or Coding Agents
-There is no restriction on the tools that you may use to complete this assessment. However we have tried to make the nature of this assessment within the scope of someone completing it without using AI assistance, as well as someone using them effectively.
+The City's hex file is made up of standard H3 level 8 cells, so instead of a point-in-polygon spatial join I calculate each request's hex directly with `h3.latlng_to_cell`. This gives the same answer, is much faster (about 1 to 2 seconds for 941,634 requests), and avoids a spatial join problem where a point exactly on a border can match two polygons and duplicate the request. I then check each hex against the section 1 output to find requests that don't fall in one of the City's hexes.
 
-If you do make use of Generative AI/Coding Agents, please include an `AI_log.md` where you log all of the work that you asked AI assistance to undertake, including any prompts, the model used as well number of tokens. It will be of considerable advantage if you can highlight or document at least one instance where the AI undertook work that you then corrected or improved upon.
+Requests with no latitude or longitude get `0`, as the challenge asks.
 
-## How to submit
-### Candidates where programming is required (Data Scientist;  Engineers, Visualisation Engineers and Front End Developers)
-1. Clone this repository and load it into your development environment. 
-2. Work the challenge, committing regularly to document your progress. Try have structured, meaningful commits, where each one adds significant functionality in a coherent manner.
-3. Host your repository somewhere that is publicly accessible. If you're using GitHub, please use a fork of our original repository.
-4. Inform us via email that your challenge is complete, including a link to your repo. Be sure to make sure it is set to public.
+**Validation.** The result is compared with `sr_hex.csv.gz`, matched on `notification_number` (checked to be unique, and the merge refuses duplicates). Current result: 941,634 of 941,634 match.
 
-**Be sure to 'watch' this repo for changes - we may push bugfixes**
+**Join failure threshold: 0.1%.** A join failure is a request that has coordinates but doesn't fall in any of the City's level 8 hexes. Requests with no coordinates (212,364, or 22.6%) are expected and aren't counted. On the current data only 3 of 729,270 requests fail (0.0004%). They're genuine border cases: two tickets at exactly the same point near the City's eastern edge, and one in Bottelary Smallholdings. They keep their real H3 ID (which is what `sr_hex` does too) and are listed in the log as warnings.
 
-NOTE: If you would like to _improve_ the content of this repository, by fixing typos or perhaps enhancing the challenge, please do so by submitting a pull request.
+0.1% is roughly 250 times the normal rate, so a few new border cases won't stop the pipeline, but it's strict enough to catch a problem that affects even a small part of the data, like one department sending around 1,000 requests with bad coordinates. Serious problems are caught easily: when I swapped latitude and longitude as a test, close to 100% of requests failed. The trade-off is that a stricter limit could occasionally stop the pipeline for something harmless, like the City's boundary changing. I think that's acceptable, since stopping just means someone takes a look, which is better than bad data flowing through unnoticed.
 
-### Candidates where programming is not required (Data Analysts)
-*NB* If you prefer, you may submit using the workflow described above.
+## Performance
 
-1. Download this repository using the Code -> `Download ZIP` option in the top right-hand corner.
-2. Add your work into this folder.
-3. Create a compressed archive file with all of your work in it.
-4. Send us an email, with your archived project attached. If it is larger than 10 MB, then share it via a cloud storage service such as DropBox, and include the link in your email. 
+| Step | Time |
+|---|---|
+| Section 1 total | ~5s |
+| Loading service requests | ~6s |
+| Assigning hexes | ~1-2s |
+| Join failure check | <1s |
+| Reference check (incl. download) | ~6s |
+| Saving output | ~9s |
+| **Whole pipeline** | **~28s** |
 
-## Challenge
-Follow the below steps, completing those indicated as relevant to the positions for which you are interviewing. If there are any steps that you can not complete after a reasonable amount of effort, rather move on to later steps, attempting everything relevant at least once.
+Saving the output was originally the slowest step at 30 seconds, because pandas uses the slowest gzip level by default. Switching to `compresslevel=1` brought it down to 9 seconds, and the file went from X MB to Y MB. <!-- TODO: fill in the two file sizes -->
 
-For all roles, we expect the challenge response to include what you consider to be role-appropriate testing and validation. For example, a Data Scientist might want to include MAPE scores or confusion matrices. A Data Engineer may want to include logging and data quality validation tests, as well as unit and even integration tests. A Data Analyst might want to plot histograms of the data in question to ensure that outliers aren't overwhelming your analysis.
+## Things I noticed in the data
 
-Your code should be well formatted according to generally accepted style guides and include whatever is necessary for a team-mate unfamiliar with it to maintain it.
+- `notification_number` has leading zeros (e.g. `001015950287`), so IDs are read as text. As numbers, the zeros would be lost and they wouldn't match `sr_hex`.
+- `reference_number` has blanks, so pandas reads it as a decimal number and shows it in scientific notation, which can lose digits. Also read as text.
+- `sr.csv.gz` has an extra unnamed column of row numbers from when it was exported. `sr_hex.csv.gz` doesn't.
+- 9,435 requests have no directorate.
+- Only 2,082 of the 3,832 level 8 hexes have any service requests, which makes sense given areas like Table Mountain and farmland.
 
-### 0. Setup
-#### Data
-We have made the following datasets available (each filename is a link). These are all available in an AWS bucket `cct-ds-code-challenge-input-data`, in the `af-south-1` region, with the object name being the filenames below):
-* [`sr.csv.gz`](https://cct-ds-code-challenge-input-data.s3.af-south-1.amazonaws.com/sr.csv.gz) contains 12 months of service request data, where each row is a service request. A service request is a request from one of the residents of the City of Cape Town to undertake significant work. This is an important source of information on service delivery, and our performance thereof. *Note* as indicated by the extension, this file is compressed.
-* [`sr_hex.csv.gz`](https://cct-ds-code-challenge-input-data.s3.af-south-1.amazonaws.com/sr_hex.csv.gz) contains the same data as `sr.csv` as well as a column `h3_level8_index`, which contains the appropriate resolution level 8 H3 index for that request. If the request doesn't have a valid geolocation, the index value will be `0`. *Note* as indicated by the extension, this file is compressed.
-* [`sr_hex_truncated.csv`](https://cct-ds-code-challenge-input-data.s3.af-south-1.amazonaws.com/sr_hex_truncated.csv) is a truncated version of `sr_hex.csv`, containing only 3 months of data.
-* [`city-hex-polygons-8.geojson`](https://cct-ds-code-challenge-input-data.s3.af-south-1.amazonaws.com/city-hex-polygons-8.geojson) contains the [H3 spatial indexing system](https://h3geo.org/) polygons and index values for the bounds of the City of Cape Town, at resolution level 8.
-* [`city-hex-polygons-8-10.geojson`](https://cct-ds-code-challenge-input-data.s3.af-south-1.amazonaws.com/city-hex-polygons-8-10.geojson) contains the [H3 spatial indexing system](https://h3geo.org/) polygons and index values for resolution levels 8, 9 and 10, for the City of Cape Town.
-* `swimming-pool-labels` (`s3://cct-ds-code-challenge-input-data.s3.af-south-1.amazonaws.com/images/swimming-pool`) contains a random sample of aerial images from Cape Town, organised into two prefixes, `yes` or `no`, corresponding to whether there is a swimming pool in the image. Within each label prefix, there is a manifest file listing all the images available, i.e. [yes](https://cct-ds-code-challenge-input-data.s3.af-south-1.amazonaws.com/images/swimming-pool/yes/manifest) and [no](https://cct-ds-code-challenge-input-data.s3.af-south-1.amazonaws.com/images/swimming-pool/no/manifest).
+## If I had more time
 
-In some of the tasks below you will be creating datasets that are similar to these, feel free to use the provided files to validate your work.
+- Add a check on the share of requests with no location, so a sudden jump (for example from 22% to 60%) would be flagged, since that would also point to an upstream problem.
+- Load the settings (thresholds, file names) from one config file rather than having some as constants in the code.
+- Save the output as Parquet instead of gzipped CSV, which is smaller, faster and keeps the column types.
 
-#### Dummy AWS Credentials
-We have made AWS credentials available in the following file, with the appropriate permissions set, [here](https://cct-ds-code-challenge-input-data.s3.af-south-1.amazonaws.com/ds_code_challenge_creds.json).
+## Use of AI
 
-*Note* These creds don't have any special access, other than what is already set on these resources for anonymous access. These are more provided to make using the various AWS client libraries easier.
-
-### 1. Data Extraction (if applying for a Data Engineering Position)
-Use the [AWS S3 SELECT](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-glacier-select-sql-reference-select.html) command to read in the H3 resolution 8 data from `city-hex-polygons-8-10.geojson`. Use the `city-hex-polygons-8.geojson` file to validate your work.
-
-Please also add an additional validation that checks conformance to a reasonable schema for the dataset. The output of this validation should be a conformance "score" of some sort, with a non-binary threshold of your choice. Explicitly capture the desired schema used to compute this conformance score in a standalone configuration or documentation file.
-
-Please log the time taken to perform the operations described as well as the validation steps, and within reason, try to optimise latency and computational resources used. Please also note the comments above about the nature of the code that we expect.
-
-### 2. Initial Data Transformation (if applying for a Data Engineering, Visualisation Engineer, Front End Developer and/or Science Position)
-Join the equivalent of the contents of the file `city-hex-polygons-8.geojson` to the service request dataset, such that each service request is assigned to a single H3 resolution level 8 hexagon. Use the `sr_hex.csv.gz` file to validate your work.
-
-For any requests where the `Latitude` and `Longitude` fields are empty, set the index value to `0`. Use your judgement to include any other appropriate validation.
-
-Include logging that lets the executor know how many of the records failed to join, and include a join error threshold above which the script will error out. Please motivate why you have selected the error threshold that you have. Please also log the time taken to perform the operations described, and within reason, try to optimise latency and computational resources used.
-
-### 3. Descriptive Analytic Tasks (if applying for a Data Analyst Position)
-*Note:* We are most interested in how you reason about the problem.
-
-Please use the `sr_hex_truncated.csv` dataset to address the following.
-
-Please provide the following:
-1. An answer to the question "In which 3 suburbs should the Urban Waste Management directorate concentrate their infrastructure improvement efforts?". Please motivate how you related the data provided to infrastructure issues.
-2. An answer to the questions:
-    1. Focusing on the Urban Waste Management directorate - "What is the median & 80th percentile time to complete each service request across the City?" (each row represent a service request).
-    2. Focusing on the Urban Waste Management directorate - "What is the median & 80th percentile time to complete each service request for the 3 suburbs identified in (1)?" (each row represent a service request).
-    3. "Is there any significant differences in the median and 80th percentile completion times between the City as a whole and the 3 suburbs identified in(1)?".  Please elaborate on the similarities or differences.
-3. Provide a visual mock of a dashboard for the purpose of monitoring progress in applying the insights developed in (1) & (2). It should focus the user on performance pain points. Add a note for each visual element, explaining how it helps fulfill this overall function. Please also provide a brief explanation as to how the data provided would be used to realise what is contained in your mock.
-4. Identify value-adding insights for the management of Urban Waste Management, from the dataset provided, in regard to waste collection within the City.
- 
-The **final deliverable** is a report (in PDF form) for the Executive Management team of the City.  An Executive-level, non-specialist should be able to read the report and follow your analysis without guidance.
-
-### 4. Predictive Analytic Tasks (if applying for a Data Science Position)
-
-Please choose __one__ of the following four tasks to solve:  (for the tasks you choose to solve, we expect you to provide (1) an initial solution and (2) an improved solution of your initial solution. For both we expect the code together with evidence or images of training or inference results, e.g. metrics, loss graph, output logs from hyperparameter tuning, confusion matrixs, etc)
-
-1. *Time series challenge*: Predict the weekly number of expected service requests per hex that will be created each week using `sr_hex.csv`, for 4 weeks past the end of the dataset.
-2. *Introspection challenge*: (using `sr_hex.csv`)    
-   2.1. Reshape the data into number of requests created, per type, per H3 level 8 hex in the last 12 months.  
-   2.2. Choose a type, and then develop a model that predicts the number of requests of that type per hex.   
-   2.3. Use the model developed in (2.2) to predict the number in (2.1).   
-   2.4. Based upon the model, and any other analysis, determine the drivers of requests of that particular type(s).   
-3. *Classification challenge*: Classify a hex in `sr_hex.csv` as sparsely or densely populated, solely based on the service request data. Provide an explanation as to how you're using the data to perform this classification. Using your classifier, please highlight any unexpected or unusual classifications, and comment on why that might be the case.
-4. *Anomaly Detection challenge*: Reshape the `sr_hex.csv` data into the number of requests created per department, per day. Please identify any days in the first 6 months of 2020 where an anomalous number of requests were created for a particular department. Please describe how you would motivate to the director of that department why they should investigate that anomaly. Your argument should rely upon the contents of the dataset and/or your anomaly detection model.
-
-Item/Task 5 must be solved:  (we expect you to provide (1) an initial solution and (2) an improved solution of your initial solution. For both we expect the code together with evidence or images of training or inference results, e.g. metrics, loss graph, output logs from hyperparameter tuning, confusion matrixs, etc)
-
-5. *Computer Vision classification challenge*: Use a sample of images from the `swimming-pool` dataset to develop a model that classifies whether an image contains a swimming pool or not. Use the provided labels to validate your model.
-
-Feel free to use any other data you can find in the public domain, except for tasks (3) and (5).
-
-**The final output of the execution of your code should be a self-contained `html` file or executed `ipynb` file that is your report.** 
- 
-A statistically minded layperson should be able to read this report and follow your analysis without guidance. In the 
-report there should be evidence of any model training done (e.g. loss graph, output logs from hyperparameter tuning), 
-along with quantitative measures or predictions of the quality of any models developed. We also expect to see some 
-process commentary, describing the quality of any initial results, refinements made, and the resulting improvement.
-
-Please also log the time taken to perform the operations described, and within reason, try to optimise latency and computation resources used. Please also note the comments above with respect to the nature of work that we expect from data scientists.
-
-### 5. Further Data Transformations (if applying for a Data Engineering Position)
-1. Create a subsample of the data by selecting all of the requests in `sr_hex.csv.gz` which are within 1 minute of the centroid of an official suburb in the proximity of Atlantis in the North of the City of Cape Town's bounds. You may determine the centroid of the suburb by the **computational** method of your choice (i.e. do not just hard code the value), but if any external data is used, your code should programmatically download and perform the centroid calculation. Please clearly document your method.
-
-2. Augment your filtered subsample of `sr_hex.csv.gz` from (1) with the appropriate [wind direction and speed data for 2020](https://www.capetown.gov.za/_layouts/OpenDataPortalHandler/DownloadHandler.ashx?DocumentName=Wind_direction_and_speed_2020.ods&DatasetDocument=https%3A%2F%2Fcityapps.capetown.gov.za%2Fsites%2Fopendatacatalog%2FDocuments%2FWind%2FWind_direction_and_speed_2020.ods) from the Atlantis Air Quality Measurement site, from when the notification was created. All of the steps for downloading and preparing the wind data, as well as the join should be performed programmatically within your script. This endpoint can be unreliable - please add an appropriate strategy for handling this, with commentary for why you chose this approach for handling an unreliable dependency.
-
-3. Write a script which anonymises your augmented subsample from (2), but preserves the following precisions (You may use H3 indice or lat/lon coordinates for your spatial data):
-   * location accuracy to within approximately 500m
-   * temporal accuracy to within 6 hours
-   * Any records or columns which you believe could lead to the resident who made the request being identified despite the restrictions made above. For the records removed, make provision for a separate review by a person to anonymise the data by hand.
-We expect in the accompanying report that you will justify as to why this data is now anonymised. Please limit this commentary to less than 500 words. If your code is written in a code notebook such as Jupyter notebook or Rmarkdown, you can include this commentary in your notebook.
-
-### 6. Data Visualisation Task (if applying for a Data Visualisation Engineering or Front End Developer Position)
-
-Using the [`sr_hex.csv.gz`](https://cct-ds-code-challenge-input-data.s3.af-south-1.amazonaws.com/sr_hex.csv.gz) dataset and open source front-end web technologies (html, css, javascript, etc), develop a data visualisation / dashboard that help to answer the question:
-
-*"In which suburbs should the Water and Sanitation directorate concentrate their infrastructure improvement efforts?".*
-
-The data visualisation / dashboard must include the following:
-
-1. A chart (plot) or charts (plots) that helps to answer the above question.
-2. A minimalist cartographic map with identifiable landmark features (e.g. major roads, railways, etc.) and some representation of the data.
-3. Make (1) and (2) interactive in some manner, so as to allow users to explore the data and uncover insights. The following example [Map with "range" sliders](https://observablehq.com/d/a040753103477386) demostrates an interactive map. However, you're not limited to this example – feel free to explore other interactive approaches.
-4. Data Storytelling: in a separate markdown document, titled `data-driven-storytelling.md`, provide a brief, step-by-step, point form description of how your visualisations (and information from the dataset) outline a data-driven story that answers the above question. 
-5. Design Principles: In a separate markdown document, titled `visualisation-design-choices.md`, please provide a brief, point form explanation for why you have chosen certain colours (e.g. for legends), fonts, the layout or anything else that will help us understand your thinking in designing the data visualisation / dashboard to answer the question. 
-6. Publish your work using an online service such as https://pages.github.com/ or any other means you are familiar with.  Anyone with an Internet connection and a modern browser such as Google Chrome, Mozilla Firefox or Microsoft Edge, should be able to see the end product and interact with it. Please reference the published link to your visualisation tool in the `README.md` of your repository.
-
-Please also note the comments above about the nature of the code that we expect.
-
-
+See [AI_log.md](AI_log.md).

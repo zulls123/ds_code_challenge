@@ -1,0 +1,29 @@
+threshold: 0.95
+
+columns:
+  index:
+    type: str
+    required: true
+    unique: true
+    h3_resolution: 8
+
+  centroid_lat:
+    type: float
+    required: true
+    min: -34.5
+    max: -33.4
+
+  centroid_lon:
+    type: float
+    required: true
+    min: 18.2
+    max: 19.1
+
+  resolution:
+    type: int
+    required: true
+    allowed: [8]
+
+  geometry:
+    type: Polygon
+    required: true

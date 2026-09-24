@@ -186,5 +186,4 @@ The data visualisation / dashboard must include the following:
 
 Please also note the comments above about the nature of the code that we expect.
 
-## Contact
-You can contact gordon.inggs, muhammed.ockards, kathryn.mcdermott and/or colinscott.anthony @ capetown.gov.za for any questions on the above.
+

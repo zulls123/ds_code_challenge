@@ -1,0 +1,3 @@
+# Share of requests WITH coordinates allowed to fall outside the City's level 8 hexes.
+# Normal is about 0.0004% (3 border cases out of ~729,000). See README for reasoning.
+max_join_failure_rate: 0.001

@@ -1,4 +1,5 @@
 threshold: 0.95
+min_rule_pass: 0.90
 
 columns:
   index:

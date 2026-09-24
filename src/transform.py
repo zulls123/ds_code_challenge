@@ -133,7 +133,7 @@ def main():
 
     start = time.perf_counter()
     OUTPUT_PATH.parent.mkdir(exist_ok=True)
-    sr.to_csv(OUTPUT_PATH, index=False)
+    sr.to_csv(OUTPUT_PATH, index=False, compression={"method": "gzip", "compresslevel": 1})
     log.info("Saved %s in %.1fs", OUTPUT_PATH.relative_to(ROOT), time.perf_counter() - start)
 
     log.info("Section 2 done in %.1fs", time.perf_counter() - total_start)
